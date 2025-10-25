@@ -18,11 +18,10 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "adc.h"
 #include "dma.h"
-#include "font.h"
-#include "i2c.h"
-#include "stm32f1xx_hal.h"
-#include "stm32f1xx_hal_tim.h"
+//#include "i2c.h"
+#include "stm32f1xx_hal_adc_ex.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -32,7 +31,6 @@
 #include "stdio.h"
 #include "string.h"
 #include "math.h"
-#include "oled.h"
 #include <stdint.h>
 #include "nrf24l01.h"
 /* USER CODE END Includes */
@@ -57,7 +55,6 @@
 /* USER CODE BEGIN PV */
 volatile uint8_t uart_rx_buffer[2];             // UART接收缓冲区
 volatile uint8_t uart_tx_buffer[2];             // UART接收缓冲区
-  char a_str[20];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -67,28 +64,12 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-/**
-  * @brief  更精确的角度控制函数（使用浮点数计算）
-  * @param  angle: 目标角度，范围0-180度
-  * @retval None
-  */
-void Servo_SetAngle_Precise(float angle)
-{
-  float pulse_width_us;
-  uint16_t ccr_value;
-  
-  // 计算脉冲宽度（us）
-  pulse_width_us = angle * (2000.0f / 180.0f) + 500.0f;
-  
-  // 限制范围
-  if (pulse_width_us < 500.0f) pulse_width_us = 500.0f;
-  if (pulse_width_us > 2500.0f) pulse_width_us = 2500.0f;
-  
-  // 转换为CCR值（定时器计数一次=10us）
-  ccr_value = (uint16_t)(pulse_width_us / 10.0f);
-  
-  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, ccr_value);
-}                                          
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
+    if (huart == &huart2) {
+    }
+    HAL_UARTEx_ReceiveToIdle_DMA(&huart2, (uint8_t *)uart_rx_buffer, sizeof(uart_rx_buffer));
+    __HAL_DMA_DISABLE_IT(&hdma_usart2_rx, DMA_IT_HT);
+  }
 /* USER CODE END 0 */
 
 /**
@@ -105,7 +86,6 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-
   HAL_Init();
 
   /* USER CODE BEGIN Init */
@@ -122,41 +102,30 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  //MX_USART2_UART_Init();
-  MX_I2C1_Init();
+  MX_USART2_UART_Init();
   MX_TIM3_Init();
+  //MX_I2C1_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1); // 启动PWM
-  Servo_SetAngle_Precise(0); // 初始化舵机到90度位置
+  HAL_ADCEx_Calibration_Start(&hadc1);
+  uint16_t values[5];
+  uint8_t data[5] = {0xAF,0xBF,0xCF,0xDF,0xEF};
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*)values, sizeof(values)/sizeof(uint16_t));
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart2, (uint8_t *)uart_rx_buffer, sizeof(uart_rx_buffer));
+  __HAL_DMA_DISABLE_IT(&hdma_usart2_rx, DMA_IT_HT);
   HAL_Delay(100);
-  OLED_Init();
   NRF24L01_Init();
   HAL_Delay(100);
-  
-  //Servo_SetAngle_Precise(0); // 初始化舵机到0度位置
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  float_t angle = 0;
   while (1)
   {
-    OLED_NewFrame();
-    sniprintf(a_str, sizeof(a_str), "%2X",__HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1));
-    OLED_PrintString(0, 0, a_str, &font16x16, OLED_COLOR_NORMAL);
-    if (NRF24L01_Receive() == 1 && NRF24L01_RxPacket[0] == 0xAF) {
-      uart_rx_buffer[0] = NRF24L01_RxPacket[0];
-      uart_rx_buffer[1] = NRF24L01_RxPacket[1];
-      
-    }
-    for (uint8_t i = 0; i < 2; i++) {
-        snprintf(a_str, sizeof(a_str), "%02X", uart_rx_buffer[i]);
-        OLED_PrintString(i * 15, 16, a_str, &font16x16, OLED_COLOR_NORMAL);
-    }
-    angle = uart_rx_buffer[1];
-    Servo_SetAngle_Precise(angle); // 设置舵机角度
-    OLED_ShowFrame();
-    HAL_Delay(5);
+      NRF24L01_TxPacket[0] = data[0];
+      NRF24L01_TxPacket[1] = values[0] /23;
+      NRF24L01_Send(NRF24L01_TxPacket);
+      HAL_Delay(5);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -172,6 +141,7 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -198,6 +168,12 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
+  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV6;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
   }
