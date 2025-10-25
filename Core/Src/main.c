@@ -20,6 +20,9 @@
 #include "main.h"
 #include "dma.h"
 #include "i2c.h"
+#include "stm32f103xb.h"
+#include "stm32f1xx.h"
+#include "stm32f1xx_hal_gpio.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -100,6 +103,10 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, 1);
+    HAL_Delay(1000);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, 0);
+    HAL_Delay(1000);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
